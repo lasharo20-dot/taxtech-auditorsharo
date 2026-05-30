@@ -287,11 +287,9 @@ if uploaded_file is not None:
             cit3.metric("Retenciones Sufridas", f"RD$ {itbis_ret_100_fisicas + itbis_ret_30_juridicas:,.2f}")
             cit4.metric("Retención Tarjeta (2%)", f"RD$ {itbis_ret_tarjetas_2:,.2f}")
             
-            # --- GENERACIÓN DEL LIBRO EXCEL (ANEXO A + IT-1 VINCULADOS) ---
             buffer_it1 = io.BytesIO()
             wb_it1 = openpyxl.Workbook()
             
-            # 1. Configurar Hoja del Anexo A
             ws_anexo = wb_it1.active
             ws_anexo.title = "Anexo_A_IT1"
             aplicar_estilos_base(ws_anexo, f"TAXTECH AUDITOR RD — ANEXO A DEL IT-1: {empresa.upper()}", f"Desglose Analítico de Ingresos, Adelantos y Retenciones")
@@ -324,7 +322,6 @@ if uploaded_file is not None:
                     if idx % 2 == 1: cell.fill = FILL_ZEBRA
             autoajustar_columnas(ws_anexo)
             
-            # 2. Configurar Hoja del Formulario IT-1 (Vinculada por Fórmulas)
             ws_form = wb_it1.create_sheet(title="Formulario_IT1")
             aplicar_estilos_base(ws_form, f"TAXTECH AUDITOR RD — FORMULARIO DEFINITIVO IT-1: {empresa.upper()}", f"Liquidación Final del Impuesto — Período: {periodo}")
             
@@ -358,58 +355,4 @@ if uploaded_file is not None:
                     if lin == "TOTAL": cell.fill = FILL_TOTAL
             
             autoajustar_columnas(ws_form)
-            wb_it1.save(buffer_it1)
-            
-            st.markdown(" ")
-            st.download_button(
-                label="📥 Descargar Libro Completo IT-1 (Anexo A + Formulario)", 
-                data=buffer_it1.getvalue(), 
-                file_name=f"Borrador_Completo_IT1_{empresa.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        with tab6:
-            st.markdown("### 🏢 Módulo de Conciliación y Liquidación TSS / INFOTEP / IR-3")
-            cp1, cp2, cp3, cp4 = st.columns(4)
-            cp1.metric("SFS Patronal (7.09%)", f"RD$ {gasto_nominas_global * TASA_SFS_PATRONAL:,.2f}")
-            cp2.metric("AFP Patronal (7.10%)", f"RD$ {gasto_nominas_global * TASA_AFP_PATRONAL:,.2f}")
-            cp3.metric("Seguro Riesgos Laborales (1.20%)", f"RD$ {gasto_nominas_global * TASA_SRL_PROMEDIO:,.2f}")
-            cp4.metric("Aporte INFOTEP (1.00%)", f"RD$ {gasto_nominas_global * TASA_INFOTEP:,.2f}")
-            
-            buffer_tss = io.BytesIO()
-            wb_tss = openpyxl.Workbook()
-            ws_tss = wb_tss.active
-            ws_tss.title = "Liquidación TSS"
-            aplicar_estilos_base(ws_tss, f"TAXTECH AUDITOR RD — CONTROL DE NÓMINA: {empresa.upper()}", f"Carga Masiva de Aportes Patronales y Retenciones TSS / IR-3")
-            
-            headers_tss = ["Tipo Componente", "Concepto de Retención o Aporte", "Porcentaje", "Monto Autocalculado"]
-            for col_idx, h in enumerate(headers_tss, start=2):
-                cell = ws_tss.cell(row=5, column=col_idx, value=h)
-                cell.font = FONT_HEADER; cell.fill = FILL_HEADER; cell.border = CELL_BORDER
-            
-            datos_tss = [
-                ("Patronal", "Seguro Familiar de Salud (SFS Patronal)", 0.0709, gasto_nominas_global * 0.0709),
-                ("Patronal", "Fondo de Pensiones (AFP Patronal)", 0.0710, gasto_nominas_global * 0.0710),
-                ("Patronal", "Seguro de Riesgos Laborales (SRL)", 0.0120, gasto_nominas_global * 0.0120),
-                ("Patronal", "Aporte INFOTEP Obligatorio (1%)", 0.0100, gasto_nominas_global * 0.0100),
-                ("Empleado", "SFS Retención Trabajador", 0.0304, gasto_nominas_global * 0.0304),
-                ("Empleado", "AFP Retención Trabajador", 0.0287, gasto_nominas_global * 0.0287),
-                ("Empleado", "Aporte Percápita Adicional (Dependientes)", 0.0000, gasto_per_capita_balanza),
-                ("TOTAL", "TOTAL LIQUIDACIÓN MENSUAL DEL ARCHIVO TSS", 0.0000, f"=SUM(E6:E12)")
-            ]
-            
-            for idx, (tipo, con, por, mnt) in enumerate(datos_tss):
-                r_idx = 6 + idx
-                ws_tss.cell(row=r_idx, column=2, value=tipo).alignment = Alignment(horizontal="center")
-                ws_tss.cell(row=r_idx, column=3, value=con)
-                c_por = ws_tss.cell(row=r_idx, column=4, value=por)
-                c_por.number_format = '0.00%'; c_por.alignment = Alignment(horizontal="center")
-                c_mnt = ws_tss.cell(row=r_idx, column=5, value=mnt)
-                c_mnt.number_format = 'RD$ #,##0.00'; c_mnt.alignment = Alignment(horizontal="right")
-                
-                for c in range(2, 6):
-                    cell = ws_tss.cell(row=r_idx, column=c)
-                    cell.font = FONT_BODY if tipo != "TOTAL" else FONT_BOLD
-                    cell.border = CELL_BORDER
-                    if idx % 2 == 1 and tipo != "TOTAL": cell.fill = FILL_ZEBRA
-                    if tipo == "TOTAL": cell.fill = FILL_TOTAL
+            wb_
