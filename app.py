@@ -10,7 +10,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 1. PARÁMETROS FISCALES Y DE CONFIGURACIÓN (CTRD / RETENCIONES)
+# 1. PARÁMETROS FISCALES Y DE CONFIGURACIÓN (CTRD / TSS / PERCÁPITA 2026)
 # ==========================================
 NATURALEZAS = {
     '1': 'Debito', '2': 'Credito', '3': 'Credito',
@@ -39,11 +39,17 @@ MAPEO_IR2 = {
     '63': 'Anexo B - Gastos Financieros'
 }
 
-# Tasas Oficiales de la Seguridad Social e INFOTEP
+# Coeficientes Oficiales Ley 87-01 e INFOTEP
 TASA_SFS_PATRONAL = 0.0709
 TASA_AFP_PATRONAL = 0.0710
 TASA_SRL_PROMEDIO = 0.0120
 TASA_INFOTEP = 0.0100
+
+TASA_SFS_EMPLEADO = 0.0304
+TASA_AFP_EMPLEADO = 0.0287
+
+# Costo Indexado Oficial TSS para Dependiente Adicional
+COSTO_PER_CAPITA_2026 = 1691.38
 
 # ==========================================
 # 2. FUNCIONES DE LÓGICA DE NEGOCIO Y AUDITORÍA
@@ -167,7 +173,7 @@ if uploaded_file is not None:
         st.markdown("---")
         st.subheader(f"📌 Informe de Auditoría Analítica: {empresa} — Período: {periodo}")
         
-        # Módulo de KPIs
+        # Módulo de KPIs Generales
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Ingresos Declarados", f"RD$ {total_ingresos:,.2f}")
         c2.metric("Total Activos Registrados", f"RD$ {total_activos:,.2f}")
@@ -176,15 +182,11 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # PESTAÑAS PRINCIPALES EXTENDIDAS
+        # PESTAÑAS PRINCIPALES
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-            "📋 Balanza", 
-            "🚨 Inconsistencias", 
-            "🇩🇴 Riesgos Art. 287", 
-            "📋 Borrador Anual IR-2",
-            "⚡ Mensual (IT-1, 606, 607)",
-            "🏢 Nómina y TSS (IR-3)",
-            "💸 Liquidación IR-17 (Retenciones)"
+            "📋 Balanza", "🚨 Inconsistencias", "🇩🇴 Riesgos Art. 287", 
+            "📋 Borrador Anual IR-2", "⚡ Mensual (IT-1, 606, 607)", 
+            "🏢 Nómina y TSS (IR-3)", "💸 Liquidación IR-17 (Retenciones)"
         ])
         
         with tab1:
@@ -225,29 +227,90 @@ if uploaded_file is not None:
         with tab6:
             st.markdown("### 🏢 Módulo de Conciliación y Liquidación TSS / INFOTEP / IR-3")
             gasto_nominas_global = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('personal|sueldo|salario', na=False)]['saldo_final'].sum())
-            c_tss1, c_tss2, c_tss3, c_tss4 = st.columns(4)
-            c_tss1.metric("Masa Salarial Global", f"RD$ {gasto_nominas_global:,.2f}")
-            c_tss2.metric("Total TSS Patronal", f"RD$ {(gasto_nominas_global * TASA_SFS_PATRONAL) + (gasto_nominas_global * TASA_AFP_PATRONAL):,.2f}")
-            c_tss3.metric("Seguro Riesgos Laborales (SRL)", f"RD$ {gasto_nominas_global * TASA_SRL_PROMEDIO:,.2f}")
-            c_tss4.metric("Aporte INFOTEP (1%)", f"RD$ {gasto_nominas_global * TASA_INFOTEP:,.2f}")
             
+            # Escáner dinámico para encontrar la cuenta de descuento per cápita adicional en la balanza
+            gasto_per_capita_balanza = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('percapita|per capita|dependiente adicional', na=False)]['saldo_final'].sum())
+            # Determinamos cuántos dependientes representa ese monto retenido
+            num_dependientes_estimados = round(gasto_per_capita_balanza / COSTO_PER_CAPITA_2026) if gasto_per_capita_balanza > 0 else 0
+            
+            st.metric("Masa Salarial Global Detectada", f"RD$ {gasto_nominas_global:,.2f}")
+            st.markdown("---")
+            
+            # FILA 1: DESGLOSE DE APORTES PATRONALES (COSTO EMPRESA)
+            st.markdown("##### 💼 Bloque 1: Aportes Patronales (Costo de la Empresa - Gasto Deducible)")
+            cp1, cp2, cp3, cp4 = st.columns(4)
+            cp1.metric("SFS Patronal (7.09%)", f"RD$ {gasto_nominas_global * TASA_SFS_PATRONAL:,.2f}")
+            cp2.metric("AFP Patronal (7.10%)", f"RD$ {gasto_nominas_global * TASA_AFP_PATRONAL:,.2f}")
+            cp3.metric("Seguro Riesgos Laborales (1.20%)", f"RD$ {gasto_nominas_global * TASA_SRL_PROMEDIO:,.2f}")
+            cp4.metric("Aporte INFOTEP (1.00%)", f"RD$ {gasto_nominas_global * TASA_INFOTEP:,.2f}")
+            
+            st.markdown("---")
+            
+            # FILA 2: DESGLOSE DE RETENCIONES AL EMPLEADO (DESCUENTOS DE NÓMINA)
+            st.markdown("##### 👥 Bloque 2: Retenciones al Empleado (Pasivo / Descuentos de Nómina)")
+            ce1, ce2, ce3, ce4 = st.columns(4)
+            ce1.metric("SFS Retenido (3.04%)", f"RD$ {gasto_nominas_global * TASA_SFS_EMPLEADO:,.2f}")
+            ce2.metric("AFP Retenido (2.87%)", f"RD$ {gasto_nominas_global * TASA_AFP_EMPLEADO:,.2f}")
+            
+            # IMPACTO DEL APORTE PERCAPITA ADICIONAL DETECTADO
+            ce3.metric("Aporte Percápita Adicional (TSS)", f"RD$ {gasto_per_capita_balanza:,.2f}", delta=f"{num_dependientes_estimados} Dependientes", delta_color="inverse")
+            
+            tot_retenciones_emp = (gasto_nominas_global * TASA_SFS_EMPLEADO) + (gasto_nominas_global * TASA_AFP_EMPLEADO) + gasto_per_capita_balanza
+            ce4.metric("Total Retenido a Empleados", f"RD$ {tot_retenciones_emp:,.2f}")
+            
+            st.markdown("---")
+            st.markdown("#### 📋 Simulación de Carga Masiva TSS por Empleados")
+            
+            if gasto_nominas_global > 0:
+                # Distribuimos el descuento per cápita detectado en la plantilla de simulación para validación analítica
+                empleados_data = {
+                    'Cédula / Identificación': ['001-XXXXXXX-1', '001-XXXXXXX-2', '001-XXXXXXX-3'],
+                    'Nombre del Empleado': ['Personal Operativo A', 'Personal Administrativo B', 'Dirección / Gerencia C'],
+                    'Sueldo Cotizable (RD$)': [gasto_nominas_global * 0.40, gasto_nominas_global * 0.35, gasto_nominas_global * 0.25],
+                    'Dependientes Adicionales': [num_dependientes_estimados if num_dependientes_estimados > 0 else 0, 0, 0]
+                }
+                df_empleados = pd.DataFrame(empleados_data)
+                
+                df_empleados['SFS Empleado (3.04%)'] = df_empleados['Sueldo Cotizable (RD$)'] * TASA_SFS_EMPLEADO
+                df_empleados['AFP Empleado (2.87%)'] = df_empleados['Sueldo Cotizable (RD$)'] * TASA_AFP_EMPLEADO
+                df_empleados['Percápita Adicional (Descuento)'] = df_empleados['Dependientes Adicionales'] * COSTO_PER_CAPITA_2026
+                df_empleados['SFS Patronal (7.09%)'] = df_empleados['Sueldo Cotizable (RD$)'] * TASA_SFS_PATRONAL
+                df_empleados['AFP Patronal (7.10%)'] = df_empleados['Sueldo Cotizable (RD$)'] * TASA_AFP_PATRONAL
+                df_empleados['SRL Patronal (1.20%)'] = df_empleados['Sueldo Cotizable (RD$)'] * TASA_SRL_PROMEDIO
+                df_empleados['INFOTEP Patronal (1.00%)'] = df_empleados['Sueldo Cotizable (RD$)'] * TASA_INFOTEP
+                
+                st.dataframe(df_empleados.style.format({
+                    'Sueldo Cotizable (RD$)': 'RD$ {:,.2f}',
+                    'SFS Empleado (3.04%)': 'RD$ {:,.2f}',
+                    'AFP Empleado (2.87%)': 'RD$ {:,.2f}',
+                    'Percápita Adicional (Descuento)': 'RD$ {:,.2f}',
+                    'SFS Patronal (7.09%)': 'RD$ {:,.2f}',
+                    'AFP Patronal (7.10%)': 'RD$ {:,.2f}',
+                    'SRL Patronal (1.20%)': 'RD$ {:,.2f}',
+                    'INFOTEP Patronal (1.00%)': 'RD$ {:,.2f}'
+                }), use_container_width=True)
+                
+                buffer_tss = io.BytesIO()
+                with pd.ExcelWriter(buffer_tss, engine='openpyxl') as writer:
+                    df_empleados.to_excel(writer, index=False, sheet_name='Borrador_TSS_IR3')
+                    
+                st.download_button(
+                    label="📥 Descargar Plantilla Auxiliar TSS & IR-3 (Excel)",
+                    data=buffer_tss.getvalue(),
+                    file_name=f"Plantilla_TSS_INFOTEP_{empresa.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
         with tab7:
-            st.markdown("### 💸 Borrador Avanzado Formulario IR-17 (Otras Retenciones)")
-            st.markdown("Cálculo y segmentación automática de retenciones locales e internacionales según el CTRD:")
-            
-            # Algoritmo de filtrado por conceptos del IR-17
+            st.markdown("### 💸 Liquidación IR-17 (Retenciones)")
             base_honorarios = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('honorario', na=False)]['saldo_final'].sum())
             base_reparaciones = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('reparacion|mantenimiento', na=False)]['saldo_final'].sum())
-            
-            # Retribuciones complementarias y beneficios (Renta, Vehículos, etc.)
             base_retribuciones = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('retribucion|especie|alquiler personal|renta personal|vehiculo personal', na=False)]['saldo_final'].sum())
             
-            # Segmentación de Remesas al exterior usando tratados CDI RD
             base_espana = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('españa|espana', na=False)]['saldo_final'].sum())
             base_canada = abs(df_balanza[df_balanza['cuenta'].str.lower().str.contains('canada|canadá', na=False)]['saldo_final'].sum())
             base_exterior_general = abs(df_balanza[(df_balanza['cuenta'].str.lower().str.contains('exterior|remesa|extranjero', na=False)) & (~df_balanza['cuenta'].str.lower().str.contains('españa|espana|canada|canadá', na=False))]['saldo_final'].sum())
             
-            # Cálculo de los impuestos retenidos liquidados individuales
             ret_honorarios = base_honorarios * 0.10
             ret_reparaciones = base_reparaciones * 0.02
             ret_retribuciones = base_retribuciones * 0.27
@@ -256,39 +319,19 @@ if uploaded_file is not None:
             ret_exterior = base_exterior_general * 0.27
             
             total_ir17_liquidar = ret_honorarios + ret_reparaciones + ret_retribuciones + ret_espana + ret_canada + ret_exterior
-            
-            # Dashboard de Resultados IR-17
             st.metric("💵 Total a Liquidar IR-17", f"RD$ {total_ir17_liquidar:,.2f}")
             
-            # Matriz de datos resumida para el usuario
             df_ir17_resumen = pd.DataFrame({
                 'Concepto o Tipo de Retención': [
-                    'Honorarios Profesionales (Persona Física - 10%)',
-                    'Servicios Técnicos y Reparaciones (Persona Física - 2%)',
-                    'Retribuciones Complementarias (Beneficios en Especie/Renta/Vehículos - 27%)',
-                    'Remesas al Exterior - Convenio España (10%)',
-                    'Remesas al Exterior - Convenio Canadá (18%)',
-                    'Remesas al Exterior - Otros Países (General - 27%)'
+                    'Honorarios Profesionales (Persona Física - 10%)', 'Servicios Técnicos y Reparaciones (Persona Física - 2%)',
+                    'Retribuciones Complementarias (27%)', 'Remesas Exterior - Convenio España (10%)',
+                    'Remesas Exterior - Convenio Canadá (18%)', 'Remesas Exterior - Otros Países (27%)'
                 ],
                 'Monto Base Imponible (RD$)': [base_honorarios, base_reparaciones, base_retribuciones, base_espana, base_canada, base_exterior_general],
                 'Impuesto Retenido (RD$)': [ret_honorarios, ret_reparaciones, ret_retribuciones, ret_espana, ret_canada, ret_exterior]
             })
-            
             st.dataframe(df_ir17_resumen.style.format({
-                'Monto Base Imponible (RD$)': 'RD$ {:,.2f}',
-                'Impuesto Retenido (RD$)': 'RD$ {:,.2f}'
+                'Monto Base Imponible (RD$)': 'RD$ {:,.2f}', 'Impuesto Retenido (RD$)': 'RD$ {:,.2f}'
             }), use_container_width=True)
-            
-            # Generador Excel IR-17
-            buffer_ir17 = io.BytesIO()
-            with pd.ExcelWriter(buffer_ir17, engine='openpyxl') as writer:
-                df_ir17_resumen.to_excel(writer, index=False, sheet_name='Borrador_IR17')
-                
-            st.download_button(
-                label="📥 Descargar Resumen IR-17 (Excel)",
-                data=buffer_ir17.getvalue(),
-                file_name=f"Borrador_IR17_{empresa.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
 else:
     st.info("👋 Por favor, carga tu archivo de Balanza de Comprobación para desplegar los cálculos automáticos.")
