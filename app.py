@@ -95,20 +95,17 @@ def es_pasivo_no_corriente(cod, nombre):
 # ──────────────────────────────────────────────────────────────────────────────
 def leer_archivo_robusto(file):
     df = None
-    # Intento 1: Como Excel puro
     try:
         file.seek(0)
         df = pd.read_excel(file, header=None)
     except: pass
     
-    # Intento 2: Como CSV UTF-8 (El archivo miente con su extensión .xls)
     if df is None or df.empty:
         try:
             file.seek(0)
             df = pd.read_csv(file, header=None, encoding='utf-8', sep=None, engine='python')
         except: pass
         
-    # Intento 3: Como CSV Latin1 (Típico en archivos de DGII)
     if df is None or df.empty:
         try:
             file.seek(0)
@@ -118,14 +115,12 @@ def leer_archivo_robusto(file):
     return df
 
 # ──────────────────────────────────────────────────────────────────────────────
-# PROCESAMIENTO DE ARCHIVOS (Balanza, 606, 607, TSS)
+# PROCESAMIENTO DE ARCHIVOS INDEPENDIENTES
 # ──────────────────────────────────────────────────────────────────────────────
 def procesar_balanza(file) -> pd.DataFrame:
     try:
         df_raw = leer_archivo_robusto(file)
-        if df_raw is None or df_raw.empty:
-            st.warning(f"No se pudo leer el archivo {file.name}. Formato no reconocido.")
-            return pd.DataFrame()
+        if df_raw is None or df_raw.empty: return pd.DataFrame()
         
         header_idx = 0
         for idx, row in df_raw.iterrows():
@@ -146,9 +141,7 @@ def procesar_balanza(file) -> pd.DataFrame:
             elif any(x in col for x in ['crédito', 'credito', 'haber', 'abonos']): indices_haber.append(i)
             elif any(x in col for x in ['saldo', 'balance', 'final', 'monto']): indices_balance.append(i)
         
-        if idx_codigo == -1 or idx_cuenta == -1: 
-            st.warning(f"No se detectaron las columnas 'Código' y 'Cuenta' en {file.name}.")
-            return pd.DataFrame()
+        if idx_codigo == -1 or idx_cuenta == -1: return pd.DataFrame()
         
         col_dict = {'codigo': df.iloc[:, idx_codigo], 'cuenta': df.iloc[:, idx_cuenta]}
         if indices_debe: col_dict['debito'] = df.iloc[:, indices_debe[-1]]
@@ -169,7 +162,6 @@ def procesar_balanza(file) -> pd.DataFrame:
                 
         return df_clean.reset_index(drop=True)
     except Exception as e: 
-        st.error(f"Error crítico al procesar balanza {file.name}: {str(e)}")
         return pd.DataFrame()
 
 def procesar_606_607(file, tipo):
@@ -189,7 +181,6 @@ def procesar_606_607(file, tipo):
         
         col_monto = next((c for c in df.columns if any(x in str(c) for x in ['total monto facturado', 'monto facturado', 'monto total'])), None)
         
-        # Búsqueda selectiva según el tipo de formato
         if tipo == "606":
             col_itbis = next((c for c in df.columns if any(x in str(c) for x in ['itbis por adelantar', 'itbis adelantado'])), None)
             if not col_itbis: col_itbis = next((c for c in df.columns if 'itbis facturado' in str(c)), None)
@@ -201,7 +192,6 @@ def procesar_606_607(file, tipo):
         
         return monto_total, itbis_total
     except Exception as e:
-        st.warning(f"Error extrayendo {tipo} de {file.name}: {e}")
         return 0.0, 0.0
 
 def procesar_tss(file):
@@ -236,7 +226,6 @@ def procesar_tss(file):
         res['total_pagar'] = res['sfs_pat'] + res['afp_pat'] + res['srl_pat'] + res['infotep'] + res['sfs_emp'] + res['afp_emp']
         return df_valid, res
     except Exception as e:
-        st.error(f"Error procesando plantilla TSS: {e}")
         return None, 0
 
 def generar_plantilla_tss():
@@ -356,9 +345,7 @@ def exportar_reporte_corporativo(empresa, periodo, anio_act, df_comp):
             ws.row_dimensions[5].height = 30
             return 6
 
-        # ─────────────────────────────────────────────────────────────────────
         # 1. BALANCE GENERAL
-        # ─────────────────────────────────────────────────────────────────────
         ws_bg = wb.active; ws_bg.title = "Balance General"
         r = create_sheet_header(ws_bg, "ESTADO DE SITUACIÓN FINANCIERA")
 
@@ -429,9 +416,7 @@ def exportar_reporte_corporativo(empresa, periodo, anio_act, df_comp):
         color_deviation(c_abs, c_pct, tot_pap_y2, tot_pap_y1)
         format_row(ws_bg, r, 'tot')
 
-        # ─────────────────────────────────────────────────────────────────────
         # 2. ESTADO DE RESULTADOS 
-        # ─────────────────────────────────────────────────────────────────────
         ws_er = wb.create_sheet("Estado de Resultados")
         r = create_sheet_header(ws_er, "ESTADO DE RESULTADOS INTEGRALES")
 
@@ -510,9 +495,7 @@ def exportar_reporte_corporativo(empresa, periodo, anio_act, df_comp):
         color_deviation(c_abs, c_pct, un_y2, un_y1)
         format_row(ws_er, r, 'tot'); r += 1
 
-        # ─────────────────────────────────────────────────────────────────────
-        # ESTADO DE CAMBIOS EN EL PATRIMONIO
-        # ─────────────────────────────────────────────────────────────────────
+        # 3. ESTADO DE CAMBIOS EN EL PATRIMONIO
         ws_pat = wb.create_sheet("Patrimonio")
         r = create_sheet_header(ws_pat, "ESTADO DE CAMBIOS EN EL PATRIMONIO")
         
@@ -534,9 +517,7 @@ def exportar_reporte_corporativo(empresa, periodo, anio_act, df_comp):
         color_deviation(c_abs, c_pct, pat_y2, pat_y1)
         format_row(ws_pat, r, 'tot')
 
-        # ─────────────────────────────────────────────────────────────────────
-        # 3. FLUJO DE EFECTIVO
-        # ─────────────────────────────────────────────────────────────────────
+        # 4. FLUJO DE EFECTIVO
         ws_fe = wb.create_sheet("Flujo de Efectivo")
         r = create_sheet_header(ws_fe, "ESTADO DE FLUJO DE EFECTIVO (Método Indirecto)")
 
@@ -600,9 +581,7 @@ def exportar_reporte_corporativo(empresa, periodo, anio_act, df_comp):
         flujo_neto_y2 = op_cft_y2 + inv_y2 + fin_y2
         r = fe_row(ws_fe, r, "VARIACIÓN NETA EN EFECTIVO Y EQUIVALENTES", flujo_neto_y2, 0, style='tot')
 
-        # ─────────────────────────────────────────────────────────────────────
-        # 4. DASHBOARD COMPARATIVO
-        # ─────────────────────────────────────────────────────────────────────
+        # 5. DASHBOARD COMPARATIVO
         ws_dash = wb.create_sheet("Dashboard", 0)
         ws_dash.sheet_properties.tabColor = "1F497D"
         ws_dash.column_dimensions['A'].width = 28
@@ -826,34 +805,36 @@ c_up1, c_up2 = st.columns(2)
 with c_up1: uploaded = st.file_uploader("📂 Cargar Balanza (Año Actual)", type=["xlsx", "xls", "csv"])
 with c_up2: uploaded_prev = st.file_uploader("📂 Cargar Balanza (Año Anterior)", type=["xlsx", "xls", "csv"])
 
-if uploaded is None:
-    st.info("👆 Sube la balanza de comprobación para iniciar.")
+if not uploaded and not file_606 and not file_607 and not file_tss:
+    st.info("👆 Sube al menos un archivo (Balanza, 606, 607 o Plantilla TSS) para iniciar tu auditoría.")
     st.stop()
 
-with st.spinner("Procesando datos contables..."):
-    df_bal = procesar_balanza(uploaded)
-    if df_bal.empty: st.stop()
-        
-    df_bal = analizar_balanza(df_bal)
+df_bal = pd.DataFrame()
+df_comp = pd.DataFrame()
 
-    if uploaded_prev:
-        df_prev = procesar_balanza(uploaded_prev)
-        df_comp = procesar_comparativo(df_bal, df_prev) if not df_prev.empty else pd.DataFrame()
-    else:
-        df_comp = df_bal.copy()
-        df_comp.rename(columns={'saldo_final': 'saldo_final_Y2'}, inplace=True)
-        df_comp['saldo_final_Y1'] = 0.0
-        df_comp['variacion_abs'] = df_comp['saldo_final_Y2']
+if uploaded:
+    with st.spinner("Procesando balanza contable..."):
+        df_bal = procesar_balanza(uploaded)
+        if not df_bal.empty:
+            df_bal = analizar_balanza(df_bal)
+            if uploaded_prev:
+                df_prev = procesar_balanza(uploaded_prev)
+                df_comp = procesar_comparativo(df_bal, df_prev) if not df_prev.empty else pd.DataFrame()
+            else:
+                df_comp = df_bal.copy()
+                df_comp.rename(columns={'saldo_final': 'saldo_final_Y2'}, inplace=True)
+                df_comp['saldo_final_Y1'] = 0.0
+                df_comp['variacion_abs'] = df_comp['saldo_final_Y2']
 
-# KPIs 
-t_ingresos = abs(df_bal[df_bal['codigo'].str.startswith('4', na=False)]['saldo_final'].sum())
-t_activos  = abs(df_bal[df_bal['codigo'].str.startswith('1', na=False)]['saldo_final'].sum())
-t_costos   = abs(df_bal[df_bal['codigo'].str.startswith('5', na=False)]['saldo_final'].sum())
-t_gastos   = abs(df_bal[df_bal['codigo'].str.startswith('6', na=False)]['saldo_final'].sum())
+# KPIs Seguros
+t_ingresos = abs(df_bal[df_bal['codigo'].str.startswith('4', na=False)]['saldo_final'].sum()) if not df_bal.empty else 0
+t_activos  = abs(df_bal[df_bal['codigo'].str.startswith('1', na=False)]['saldo_final'].sum()) if not df_bal.empty else 0
+t_costos   = abs(df_bal[df_bal['codigo'].str.startswith('5', na=False)]['saldo_final'].sum()) if not df_bal.empty else 0
+t_gastos   = abs(df_bal[df_bal['codigo'].str.startswith('6', na=False)]['saldo_final'].sum()) if not df_bal.empty else 0
 utilidad_neta = t_ingresos - t_costos - t_gastos
-ir2_vals = calcular_casillas_ir2(df_bal)
+ir2_vals = calcular_casillas_ir2(df_bal) if not df_bal.empty else {'cas_34': 0}
 
-# Módulos Anexos
+# Módulos Anexos Independientes
 itbis_606, monto_606 = procesar_606_607(file_606, "606") if file_606 else (0,0)
 itbis_607, monto_607 = procesar_606_607(file_607, "607") if file_607 else (0,0)
 df_tss, tss_res = procesar_tss(file_tss) if file_tss else (None, None)
@@ -868,56 +849,85 @@ tab_comp, tab_bg, tab_er, tab_pat, tab_efe, tab_bal, tab_inconsist, tab_art287, 
 
 try:
     with tab_comp:
-        c1, c2 = st.columns(2)
-        with c1: 
-            st.metric("Ingresos Año Actual", f"RD$ {t_ingresos:,.0f}")
-        with c2:
-            excel_bytes = exportar_reporte_corporativo(empresa, periodo, anio, df_comp)
-            if excel_bytes: st.download_button("📥 Descargar Reporte Financiero Completo (Excel)", data=excel_bytes, file_name=f"Reporte_{empresa.replace(' ','_')}.xlsx")
-        df_chart = pd.DataFrame({'Año': [f"{int(anio)-1}", f"{anio}"], 'Ingresos': [sum(abs(df_comp[df_comp['codigo'].str.startswith('4', na=False)]['saldo_final_Y1'])), t_ingresos], 'Activos': [sum(abs(df_comp[df_comp['codigo'].str.startswith('1', na=False)]['saldo_final_Y1'])), t_activos]})
-        st.plotly_chart(px.bar(df_chart, x='Año', y=['Ingresos', 'Activos'], barmode='group'), use_container_width=True)
+        if not df_comp.empty:
+            c1, c2 = st.columns(2)
+            with c1: st.metric("Ingresos Año Actual", f"RD$ {t_ingresos:,.0f}")
+            with c2:
+                excel_bytes = exportar_reporte_corporativo(empresa, periodo, anio, df_comp)
+                if excel_bytes: st.download_button("📥 Descargar Reporte Financiero Completo (Excel)", data=excel_bytes, file_name=f"Reporte_{empresa.replace(' ','_')}.xlsx")
+            df_chart = pd.DataFrame({'Año': [f"{int(anio)-1}", f"{anio}"], 'Ingresos': [sum(abs(df_comp[df_comp['codigo'].str.startswith('4', na=False)]['saldo_final_Y1'])), t_ingresos], 'Activos': [sum(abs(df_comp[df_comp['codigo'].str.startswith('1', na=False)]['saldo_final_Y1'])), t_activos]})
+            st.plotly_chart(px.bar(df_chart, x='Año', y=['Ingresos', 'Activos'], barmode='group'), use_container_width=True)
+        else:
+            st.info("Carga la balanza de comprobación para ver el Dashboard Financiero.")
 
     with tab_bg:
-        c1, c2 = st.columns(2)
-        with c1: st.markdown(html_balance_general(df_comp, anio, 'activo'), unsafe_allow_html=True)
-        with c2: st.markdown(html_balance_general(df_comp, anio, 'pasivo'), unsafe_allow_html=True)
+        if not df_comp.empty:
+            c1, c2 = st.columns(2)
+            with c1: st.markdown(html_balance_general(df_comp, anio, 'activo'), unsafe_allow_html=True)
+            with c2: st.markdown(html_balance_general(df_comp, anio, 'pasivo'), unsafe_allow_html=True)
+        else: st.info("Carga la balanza de comprobación para generar el Balance General.")
         
-    with tab_er: st.markdown(html_estado_resultados(df_comp, anio), unsafe_allow_html=True)
-    with tab_pat: st.markdown(html_cambios_patrimonio(df_comp, anio), unsafe_allow_html=True)
-    with tab_efe: st.markdown(html_flujo_hoja_trabajo(df_comp, anio), unsafe_allow_html=True)
+    with tab_er: 
+        if not df_comp.empty: st.markdown(html_estado_resultados(df_comp, anio), unsafe_allow_html=True)
+        else: st.info("Carga la balanza de comprobación para generar el Estado de Resultados.")
+        
+    with tab_pat: 
+        if not df_comp.empty: st.markdown(html_cambios_patrimonio(df_comp, anio), unsafe_allow_html=True)
+        else: st.info("Carga la balanza de comprobación para generar el Estado de Cambios en el Patrimonio.")
+        
+    with tab_efe: 
+        if not df_comp.empty: st.markdown(html_flujo_hoja_trabajo(df_comp, anio), unsafe_allow_html=True)
+        else: st.info("Carga la balanza de comprobación para generar el Flujo de Efectivo.")
     
     with tab_bal: 
-        df_show_bal = df_bal[['codigo', 'cuenta', 'saldo_final']]
-        st.dataframe(df_show_bal, use_container_width=True)
-        st.download_button("📥 Descargar Tabla (Excel)", data=generar_excel_descargable(df_show_bal), file_name="Balanza_Auditoria.xlsx")
+        if not df_bal.empty:
+            df_show_bal = df_bal[['codigo', 'cuenta', 'saldo_final']]
+            st.dataframe(df_show_bal, use_container_width=True)
+            st.download_button("📥 Descargar Tabla (Excel)", data=generar_excel_descargable(df_show_bal), file_name="Balanza_Auditoria.xlsx")
+        else: st.info("Carga la balanza de comprobación para ver los datos procesados.")
         
     with tab_inconsist: 
-        df_show_inc = df_bal[~df_bal['validacion_naturaleza'].str.startswith('✅')][['codigo', 'cuenta', 'saldo_final', 'validacion_naturaleza']]
-        st.dataframe(df_show_inc, use_container_width=True)
-        if not df_show_inc.empty: st.download_button("📥 Descargar Tabla (Excel)", data=generar_excel_descargable(df_show_inc), file_name="Inconsistencias.xlsx", key="btn_inc")
-        else: st.success("✅ Sin inconsistencias.")
+        if not df_bal.empty:
+            df_show_inc = df_bal[~df_bal['validacion_naturaleza'].str.startswith('✅')][['codigo', 'cuenta', 'saldo_final', 'validacion_naturaleza']]
+            st.dataframe(df_show_inc, use_container_width=True)
+            if not df_show_inc.empty: st.download_button("📥 Descargar Tabla (Excel)", data=generar_excel_descargable(df_show_inc), file_name="Inconsistencias.xlsx", key="btn_inc")
+            else: st.success("✅ Sin inconsistencias.")
+        else: st.info("Carga la balanza de comprobación para buscar inconsistencias.")
         
     with tab_art287: 
-        df_show_art = df_bal[df_bal['alerta_fiscal'] != ""][['codigo', 'cuenta', 'saldo_final', 'alerta_fiscal']]
-        st.dataframe(df_show_art, use_container_width=True)
-        if not df_show_art.empty: st.download_button("📥 Descargar Tabla (Excel)", data=generar_excel_descargable(df_show_art), file_name="Riesgos_Art287.xlsx", key="btn_art")
-        else: st.success("✅ Sin alertas.")
+        if not df_bal.empty:
+            df_show_art = df_bal[df_bal['alerta_fiscal'] != ""][['codigo', 'cuenta', 'saldo_final', 'alerta_fiscal']]
+            st.dataframe(df_show_art, use_container_width=True)
+            if not df_show_art.empty: st.download_button("📥 Descargar Tabla (Excel)", data=generar_excel_descargable(df_show_art), file_name="Riesgos_Art287.xlsx", key="btn_art")
+            else: st.success("✅ Sin alertas.")
+        else: st.info("Carga la balanza de comprobación para validar riesgos de deducibilidad.")
         
-    with tab_ir2: st.markdown(html_borrador_ir2(df_bal, periodo), unsafe_allow_html=True)
+    with tab_ir2: 
+        if not df_bal.empty: st.markdown(html_borrador_ir2(df_bal, periodo), unsafe_allow_html=True)
+        else: st.info("Carga la balanza de comprobación para generar el borrador del IR-2.")
 
     with tab_it1:
-        st.markdown("### Pre-Liquidación IT-1 (En base a formatos 606/607 cargados)")
+        st.markdown("### 🧾 Borrador Pre-Liquidación IT-1")
         if not file_606 and not file_607:
-            st.warning("Carga los formatos 606 y 607 en la barra lateral para generar el cruce.")
+            st.info("👆 Carga los formatos 606 y/o 607 en la barra lateral para generar el análisis de ITBIS de manera independiente.")
         else:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("ITBIS Cobrado (607)", f"RD$ {itbis_607:,.2f}")
-            col2.metric("ITBIS Adelantado (606)", f"RD$ {itbis_606:,.2f}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### 📊 Formato 607 (Ventas)")
+                st.metric("Total Facturado (Ingresos)", f"RD$ {monto_607:,.2f}")
+                st.metric("ITBIS Facturado (Cobrado)", f"RD$ {itbis_607:,.2f}")
+            with col2:
+                st.markdown("#### 🛒 Formato 606 (Compras)")
+                st.metric("Total Compras/Servicios", f"RD$ {monto_606:,.2f}")
+                st.metric("ITBIS Adelantado (Pagado)", f"RD$ {itbis_606:,.2f}")
+            
+            st.markdown("---")
             pago = itbis_607 - itbis_606
-            col3.metric("ITBIS a Pagar / (Favor)", f"RD$ {pago:,.2f}")
+            if pago > 0: st.error(f"### ⚠️ ITBIS Estimado a Pagar: RD$ {pago:,.2f}")
+            else: st.success(f"### ✅ Saldo a Favor Estimado: RD$ {abs(pago):,.2f}")
 
     with tab_tss:
-        st.markdown("### Conciliación de Nómina (TSS)")
+        st.markdown("### 👥 Conciliación de Nómina (TSS)")
         st.download_button("📥 Descargar Plantilla Vacía Autodeterminación", data=generar_plantilla_tss(), file_name="Plantilla_TSS_Vacia.xlsx")
         
         if file_tss and tss_res:
@@ -929,18 +939,24 @@ try:
             st.dataframe(df_tss, use_container_width=True)
             st.download_button("📥 Descargar Tabla TSS (Excel)", data=generar_excel_descargable(df_tss), file_name="Auditoria_TSS.xlsx")
         else:
-            st.info("Sube la plantilla de Autodeterminación TSS para auditar el cálculo de retenciones y aportes.")
+            st.info("Sube la plantilla de Autodeterminación TSS en la barra lateral para auditar el cálculo de retenciones y aportes de forma independiente.")
 
     with tab_consol:
-        st.markdown("### Resumen Fiscal Consolidado")
+        st.markdown("### 🏛️ Resumen Fiscal Consolidado")
         isr_est = max(0, utilidad_neta) * 0.27
+        
+        estado_ir2 = "Base Balanza" if not df_bal.empty else "Falta Balanza"
+        estado_it1 = "Calculado (Anexos)" if (file_606 or file_607) else "Falta 606/607"
+        estado_tss = "Calculado (Plantilla)" if file_tss else "Falta Plantilla TSS"
+        
         df_consol = pd.DataFrame([
-            ("IT-1", "ITBIS Mensual (Cruce 606/607)", f"RD$ {(itbis_607 - itbis_606):,.2f}", "Calculado"),
-            ("IR-3", "Seguridad Social (TSS Estimado)", f"RD$ {tss_res['total_pagar'] if tss_res else 0:,.2f}", "Calculado" if tss_res else "Falta Plantilla"),
-            ("IR-2", "Impuesto Renta Estimado", f"RD$ {isr_est:,.2f}", "Base Balanza"),
-        ], columns=["Formulario", "Concepto", "Monto Estimado", "Estado"])
+            ("IT-1", "ITBIS Mensual (Cruce 606/607)", f"RD$ {(itbis_607 - itbis_606):,.2f}", estado_it1),
+            ("IR-3", "Seguridad Social (TSS Estimado)", f"RD$ {tss_res['total_pagar'] if tss_res else 0:,.2f}", estado_tss),
+            ("IR-2", "Impuesto Renta Estimado", f"RD$ {isr_est:,.2f}", estado_ir2),
+        ], columns=["Formulario", "Concepto", "Monto Estimado", "Estado del Cálculo"])
+        
         st.dataframe(df_consol, use_container_width=True, hide_index=True)
         st.download_button("📥 Descargar Consolidado (Excel)", data=generar_excel_descargable(df_consol), file_name="Consolidado_Fiscal.xlsx")
 
 except Exception as e:
-    st.error(f"Error al renderizar: {e}")
+    st.error(f"Error al renderizar la interfaz: {e}")
