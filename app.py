@@ -91,15 +91,41 @@ def es_pasivo_no_corriente(cod, nombre):
     return False
 
 # ──────────────────────────────────────────────────────────────────────────────
+# LECTOR DE ARCHIVOS UNIVERSAL (Tolerante a "Falsos Excel" y CSVs)
+# ──────────────────────────────────────────────────────────────────────────────
+def leer_archivo_robusto(file):
+    df = None
+    # Intento 1: Como Excel puro
+    try:
+        file.seek(0)
+        df = pd.read_excel(file, header=None)
+    except: pass
+    
+    # Intento 2: Como CSV UTF-8 (El archivo miente con su extensión .xls)
+    if df is None or df.empty:
+        try:
+            file.seek(0)
+            df = pd.read_csv(file, header=None, encoding='utf-8', sep=None, engine='python')
+        except: pass
+        
+    # Intento 3: Como CSV Latin1 (Típico en archivos de DGII)
+    if df is None or df.empty:
+        try:
+            file.seek(0)
+            df = pd.read_csv(file, header=None, encoding='latin1', sep=None, engine='python')
+        except: pass
+        
+    return df
+
+# ──────────────────────────────────────────────────────────────────────────────
 # PROCESAMIENTO DE ARCHIVOS (Balanza, 606, 607, TSS)
 # ──────────────────────────────────────────────────────────────────────────────
 def procesar_balanza(file) -> pd.DataFrame:
     try:
-        if file.name.lower().endswith(('.xlsx', '.xls')): 
-            df_raw = pd.read_excel(file, header=None)
-        else: 
-            try: df_raw = pd.read_csv(file, header=None, encoding='utf-8')
-            except UnicodeDecodeError: df_raw = pd.read_csv(file, header=None, encoding='latin1')
+        df_raw = leer_archivo_robusto(file)
+        if df_raw is None or df_raw.empty:
+            st.warning(f"No se pudo leer el archivo {file.name}. Formato no reconocido.")
+            return pd.DataFrame()
         
         header_idx = 0
         for idx, row in df_raw.iterrows():
@@ -148,49 +174,49 @@ def procesar_balanza(file) -> pd.DataFrame:
 
 def procesar_606_607(file, tipo):
     try:
-        if file.name.lower().endswith(('.xlsx', '.xls')): df_raw = pd.read_excel(file, header=None)
-        else: 
-            try: df_raw = pd.read_csv(file, header=None, encoding='utf-8')
-            except: df_raw = pd.read_csv(file, header=None, encoding='latin1')
+        df_raw = leer_archivo_robusto(file)
+        if df_raw is None or df_raw.empty: return 0.0, 0.0
         
-        h_idx = 0
+        h_idx = -1
         for idx, row in df_raw.iterrows():
             row_str = ' '.join([str(x).lower() for x in row.values])
             if 'rnc' in row_str and ('ncf' in row_str or 'monto' in row_str):
                 h_idx = idx; break
+                
+        if h_idx == -1: return 0.0, 0.0
         
         df = pd.DataFrame(df_raw.iloc[h_idx + 1:].values, columns=df_raw.iloc[h_idx].astype(str).str.lower().str.strip())
         
-        col_monto, col_itbis = None, None
-        for col in df.columns:
-            if any(x in col for x in ['monto facturado', 'monto total', 'total monto']): col_monto = col
-            if any(x in col for x in ['itbis facturado', 'itbis cobrado', 'itbis adelantado']): col_itbis = col
+        col_monto = next((c for c in df.columns if any(x in str(c) for x in ['total monto facturado', 'monto facturado', 'monto total'])), None)
+        
+        # Búsqueda selectiva según el tipo de formato
+        if tipo == "606":
+            col_itbis = next((c for c in df.columns if any(x in str(c) for x in ['itbis por adelantar', 'itbis adelantado'])), None)
+            if not col_itbis: col_itbis = next((c for c in df.columns if 'itbis facturado' in str(c)), None)
+        else:
+            col_itbis = next((c for c in df.columns if any(x in str(c) for x in ['itbis cobrado', 'itbis facturado'])), None)
             
-        monto_total = pd.to_numeric(df[col_monto].astype(str).str.replace(',', ''), errors='coerce').sum() if col_monto else 0.0
-        itbis_total = pd.to_numeric(df[col_itbis].astype(str).str.replace(',', ''), errors='coerce').sum() if col_itbis else 0.0
+        monto_total = pd.to_numeric(df[col_monto].astype(str).str.replace(',', ''), errors='coerce').fillna(0).sum() if col_monto else 0.0
+        itbis_total = pd.to_numeric(df[col_itbis].astype(str).str.replace(',', ''), errors='coerce').fillna(0).sum() if col_itbis else 0.0
         
         return monto_total, itbis_total
     except Exception as e:
-        st.warning(f"No se pudo extraer métricas completas de {file.name}: {e}")
+        st.warning(f"Error extrayendo {tipo} de {file.name}: {e}")
         return 0.0, 0.0
 
 def procesar_tss(file):
     try:
-        if file.name.lower().endswith(('.xlsx', '.xls')): df = pd.read_excel(file, header=None)
-        else:
-            try: df = pd.read_csv(file, header=None, encoding='utf-8')
-            except: df = pd.read_csv(file, header=None, encoding='latin1')
+        df_raw = leer_archivo_robusto(file)
+        if df_raw is None or df_raw.empty: return None, 0
             
         h_idx = 0
-        for idx, row in df.iterrows():
+        for idx, row in df_raw.iterrows():
             if 'cédula' in ' '.join([str(x).lower() for x in row.values]) or 'cedula' in ' '.join([str(x).lower() for x in row.values]):
                 h_idx = idx; break
                 
-        df.columns = df.iloc[h_idx].astype(str).str.lower().str.strip()
-        df = df.iloc[h_idx + 1:].reset_index(drop=True)
+        df = pd.DataFrame(df_raw.iloc[h_idx + 1:].values, columns=df_raw.iloc[h_idx].astype(str).str.lower().str.strip())
         
-        col_salario = next((c for c in df.columns if 'salario ordinario' in c or 'sueldo' in c), None)
-        
+        col_salario = next((c for c in df.columns if 'salario ordinario' in str(c) or 'sueldo' in str(c)), None)
         if not col_salario: return None, 0
         
         df[col_salario] = pd.to_numeric(df[col_salario].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
@@ -857,9 +883,7 @@ try:
         with c2: st.markdown(html_balance_general(df_comp, anio, 'pasivo'), unsafe_allow_html=True)
         
     with tab_er: st.markdown(html_estado_resultados(df_comp, anio), unsafe_allow_html=True)
-    
     with tab_pat: st.markdown(html_cambios_patrimonio(df_comp, anio), unsafe_allow_html=True)
-    
     with tab_efe: st.markdown(html_flujo_hoja_trabajo(df_comp, anio), unsafe_allow_html=True)
     
     with tab_bal: 
